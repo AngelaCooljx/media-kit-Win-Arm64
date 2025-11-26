@@ -87,9 +87,20 @@ if(NOT LIBMPV_SRC_VALID)
   message(STATUS "Extracting ${LIBMPV}...")
   make_directory("${LIBMPV_SRC}")
   add_custom_target("${PROJECT_NAME}_LIBMPV_EXTRACT" ALL)
+  
+  find_program(SEVEN_ZIP_EXE 7z)
+  if(SEVEN_ZIP_EXE)
+    message(STATUS "Found 7z: ${SEVEN_ZIP_EXE}")
+    set(EXTRACT_COMMAND "${SEVEN_ZIP_EXE}" x "\"${LIBMPV_ARCHIVE}\"" -y)
+  else()
+    message(STATUS "7z not found, trying to use cmake -E tar (might fail for .7z with specific codecs)")
+    set(EXTRACT_COMMAND "${CMAKE_COMMAND}" -E tar xf "\"${LIBMPV_ARCHIVE}\"")
+  endif()
+
   add_custom_command(
     TARGET "${PROJECT_NAME}_LIBMPV_EXTRACT"
-    COMMAND "${CMAKE_COMMAND}" -E tar xzf "\"${LIBMPV_ARCHIVE}\""
+    POST_BUILD
+    COMMAND ${EXTRACT_COMMAND}
     COMMAND xcopy "\"${LIBMPV_SRC}/include/mpv\"" "\"${LIBMPV_SRC}/mpv\"" /E /H /C /I
     COMMAND rmdir "\"${LIBMPV_SRC}/include\"" /S /Q
     COMMAND ren "\"${LIBMPV_SRC}/mpv\"" "\"include\""
@@ -100,21 +111,21 @@ endif()
 # ------------------------------------------------------------------------------
 
 # ANGLE archive containing the pre-built shared libraries & headers.
-set(ANGLE "ANGLE.7z")
+set(ANGLE "angle-windows-arm64.zip")
 
-# Download URL & MD5 hash of the ANGLE archive.
-set(ANGLE_URL "https://github.com/alexmercerind/flutter-windows-ANGLE-OpenGL-ES/releases/download/v1.0.1/ANGLE.7z")
-set(ANGLE_MD5 "e866f13e8d552348058afaafe869b1ed")
+# Download URL of the ANGLE archive.
+set(ANGLE_URL "https://github.com/jeremyfa/build-angle/releases/latest/download/${ANGLE}")
 
 # Download location of the ANGLE archive.
 set(ANGLE_ARCHIVE "${CMAKE_BINARY_DIR}/${ANGLE}")
 set(ANGLE_SRC "${CMAKE_BINARY_DIR}/ANGLE")
 
-download_and_verify(
-  ${ANGLE_URL}
-  ${ANGLE_MD5}
-  ${ANGLE_ARCHIVE}
-)
+# Download the archive if it doesn't exist.
+if(NOT EXISTS "${ANGLE_ARCHIVE}")
+  message(STATUS "Downloading archive from ${ANGLE_URL}...")
+  file(DOWNLOAD "${ANGLE_URL}" "${ANGLE_ARCHIVE}")
+  message(STATUS "Downloaded archive to ${ANGLE_ARCHIVE}.")
+endif()
 
 check_directory_exists_and_not_empty(${ANGLE_SRC} ANGLE_SRC_VALID)
 
@@ -125,7 +136,10 @@ if(NOT ANGLE_SRC_VALID)
   add_custom_target("${PROJECT_NAME}_ANGLE_EXTRACT" ALL)
   add_custom_command(
     TARGET "${PROJECT_NAME}_ANGLE_EXTRACT"
-    COMMAND "${CMAKE_COMMAND}" -E tar xzf "\"${ANGLE_ARCHIVE}\""
+    POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E tar xf "\"${ANGLE_ARCHIVE}\""
+    COMMAND "${CMAKE_COMMAND}" -E copy "${ANGLE_SRC}/lib/libEGL.lib" "${ANGLE_SRC}/lib/libEGL.dll.lib"
+    COMMAND "${CMAKE_COMMAND}" -E copy "${ANGLE_SRC}/lib/libGLESv2.lib" "${ANGLE_SRC}/lib/libGLESv2.dll.lib"
     WORKING_DIRECTORY "${ANGLE_SRC}"
   )
 endif()
@@ -164,14 +178,103 @@ target_link_libraries(
   flutter_wrapper_plugin
 )
 
+# ------------------------------------------------------------------------------
+# Local libraries
+# ------------------------------------------------------------------------------
+
+set(VK_SWIFTSHADER_DLL "")
+# The install-vulkan-sdk-action downloads x64 SwiftShader even on ARM64 runners.
+# We must skip it for ARM64 builds to avoid architecture mismatch.
+if(CMAKE_GENERATOR_PLATFORM MATCHES "ARM64")
+  message(STATUS "Skipping vk_swiftshader.dll for ARM64 build (binary is x64).")
+else()
+  if(EXISTS "C:/swiftshader/vk_swiftshader.dll")
+    set(VK_SWIFTSHADER_DLL "C:/swiftshader/vk_swiftshader.dll")
+  endif()
+endif()
+
+set(VULKAN_1_DLL "")
+# Search recursively because the ARM64 runtime zip extracts to a subdirectory
+# e.g. C:/VulkanSDK/1.4.328.1/runtime/VulkanRT-ARM64-1.4.328.1-Components/vulkan-1.dll
+file(GLOB_RECURSE VULKAN_1_DLL_CANDIDATES "C:/VulkanSDK/vulkan-1.dll")
+
+if(VULKAN_1_DLL_CANDIDATES)
+  # Sort to get consistent results, though usually there's only one SDK version installed in CI
+  list(SORT VULKAN_1_DLL_CANDIDATES)
+  list(REVERSE VULKAN_1_DLL_CANDIDATES)
+  list(GET VULKAN_1_DLL_CANDIDATES 0 VULKAN_1_DLL)
+  message(STATUS "Found vulkan-1.dll at ${VULKAN_1_DLL}")
+else()
+  message(WARNING "vulkan-1.dll not found in C:/VulkanSDK/")
+endif()
+
+# ------------------------------------------------------------------------------
+# ZLIB (Chromium fork)
+# ------------------------------------------------------------------------------
+
+set(ZLIB_URL "https://chromium.googlesource.com/chromium/src/third_party/zlib")
+set(ZLIB_SRC "${CMAKE_BINARY_DIR}/zlib_src")
+set(ZLIB_BUILD "${CMAKE_BINARY_DIR}/zlib_build")
+
+if(NOT EXISTS "${ZLIB_SRC}")
+  message(STATUS "Cloning zlib from ${ZLIB_URL}...")
+  execute_process(
+    COMMAND git clone --depth 1 -b main "${ZLIB_URL}" "${ZLIB_SRC}"
+    RESULT_VARIABLE GIT_EXIT_CODE
+  )
+  if(NOT GIT_EXIT_CODE EQUAL 0)
+    message(FATAL_ERROR "Failed to clone zlib repository.")
+  endif()
+endif()
+
+# is_official_build=true is a GN argument. In CMake, we use CMAKE_BUILD_TYPE=Release for optimizations.
+if(NOT EXISTS "${ZLIB_BUILD}/zlib.dll" AND NOT EXISTS "${ZLIB_BUILD}/Release/zlib.dll" AND NOT EXISTS "${ZLIB_BUILD}/zlib1.dll" AND NOT EXISTS "${ZLIB_BUILD}/Release/zlib1.dll")
+  message(STATUS "Building zlib...")
+  file(MAKE_DIRECTORY "${ZLIB_BUILD}")
+  
+  execute_process(
+    COMMAND "${CMAKE_COMMAND}" -S "${ZLIB_SRC}" -B "${ZLIB_BUILD}"
+    WORKING_DIRECTORY "${ZLIB_BUILD}"
+    RESULT_VARIABLE CMAKE_CONFIG_EXIT_CODE
+  )
+  
+  if(NOT CMAKE_CONFIG_EXIT_CODE EQUAL 0)
+     message(FATAL_ERROR "Failed to configure zlib. Ensure the repository contains a CMakeLists.txt.")
+  endif()
+
+  execute_process(
+    COMMAND "${CMAKE_COMMAND}" --build "${ZLIB_BUILD}" --config Release
+    WORKING_DIRECTORY "${ZLIB_BUILD}"
+    RESULT_VARIABLE CMAKE_BUILD_EXIT_CODE
+  )
+  
+  if(NOT CMAKE_BUILD_EXIT_CODE EQUAL 0)
+     message(FATAL_ERROR "Failed to build zlib.")
+  endif()
+endif()
+
+set(ZLIB_DLL "")
+foreach(CANDIDATE "${ZLIB_BUILD}/zlib.dll" "${ZLIB_BUILD}/Release/zlib.dll" "${ZLIB_BUILD}/zlib1.dll" "${ZLIB_BUILD}/Release/zlib1.dll")
+  if(EXISTS "${CANDIDATE}")
+    set(ZLIB_DLL "${CANDIDATE}")
+    break()
+  endif()
+endforeach()
+
+if(NOT ZLIB_DLL)
+    message(WARNING "zlib.dll (or zlib1.dll) not found after build in ${ZLIB_BUILD}")
+else()
+    message(STATUS "Found zlib dll at ${ZLIB_DLL}")
+endif()
+
 set(
   media_kit_libs_windows_video_bundled_libraries
   "${LIBMPV_SRC}/libmpv-2.dll"
-  "${ANGLE_SRC}/d3dcompiler_47.dll"
-  "${ANGLE_SRC}/libEGL.dll"
-  "${ANGLE_SRC}/libGLESv2.dll"
-  "${ANGLE_SRC}/vk_swiftshader.dll"
-  "${ANGLE_SRC}/vulkan-1.dll"
-  "${ANGLE_SRC}/zlib.dll"
+  "${ANGLE_SRC}/bin/d3dcompiler_47.dll"
+  "${ANGLE_SRC}/bin/libEGL.dll"
+  "${ANGLE_SRC}/bin/libGLESv2.dll"
+  "${VK_SWIFTSHADER_DLL}"
+  "${VULKAN_1_DLL}"
+  "${ZLIB_DLL}"
   PARENT_SCOPE
 )

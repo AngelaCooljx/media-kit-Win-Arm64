@@ -166,11 +166,7 @@ void VideoOutput::Render() {
       auto pitch = 4 * size[0];
       mpv_render_param params[]{
           {MPV_RENDER_PARAM_SW_SIZE, size},
-#ifdef MEDIA_KIT_WINDOWS_ARM64
-          {MPV_RENDER_PARAM_SW_FORMAT, "rgba"},
-#else
           {MPV_RENDER_PARAM_SW_FORMAT, "rgb0"},
-#endif
           {MPV_RENDER_PARAM_SW_STRIDE, &pitch},
           {MPV_RENDER_PARAM_SW_POINTER, pixel_buffer_.get()},
           {MPV_RENDER_PARAM_INVALID, nullptr},

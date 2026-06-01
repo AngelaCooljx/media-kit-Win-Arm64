@@ -47,6 +47,12 @@ if(MEDIA_KIT_LIBS_AVAILABLE)
     ${PLUGIN_NAME} PRIVATE
     FLUTTER_PLUGIN_IMPL
   )
+  if(CMAKE_GENERATOR_PLATFORM MATCHES "ARM64")
+    target_compile_definitions(
+      ${PLUGIN_NAME} PRIVATE
+      MEDIA_KIT_WINDOWS_ARM64=1
+    )
+  endif()
 
   target_include_directories(
     ${PLUGIN_NAME} INTERFACE

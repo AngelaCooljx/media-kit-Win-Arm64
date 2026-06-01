@@ -111,8 +111,11 @@ class NativeVideoController extends PlatformVideoController {
       },
     });
 
-    await completer.future;
-    controller.id.removeListener(listener);
+    try {
+      await completer.future.timeout(const Duration(seconds: 5));
+    } finally {
+      controller.id.removeListener(listener);
+    }
 
     // Return the [VideoController].
     return controller;

@@ -109,8 +109,8 @@ VideoOutput::VideoOutput(int64_t handle,
 
 VideoOutput::~VideoOutput() {
   destroyed_ = true;
-  auto promise = std::promise<void>();
   if (texture_id_) {
+    auto promise = std::promise<void>();
     registrar_->texture_registrar()->UnregisterTexture(
         texture_id_, [&, texture_id = texture_id_]() {
           // Add one more task into the thread pool queue & exit the destructor
@@ -137,14 +137,15 @@ VideoOutput::~VideoOutput() {
             promise.set_value();
           });
         });
+    promise.get_future().wait();
   }
-
-  promise.get_future().wait();
   texture_id_ = 0;
 
-  thread_pool_ref_->Post([render_context = render_context_]() {
-    mpv_render_context_free(render_context);
-  });
+  if (render_context_ != nullptr) {
+    thread_pool_ref_->Post([render_context = render_context_]() {
+      mpv_render_context_free(render_context);
+    });
+  }
 }
 
 void VideoOutput::NotifyRender() {
@@ -182,7 +183,11 @@ void VideoOutput::Render() {
       auto pitch = 4 * size[0];
       mpv_render_param params[]{
           {MPV_RENDER_PARAM_SW_SIZE, size},
+#ifdef MEDIA_KIT_WINDOWS_ARM64
+          {MPV_RENDER_PARAM_SW_FORMAT, "rgba"},
+#else
           {MPV_RENDER_PARAM_SW_FORMAT, "rgb0"},
+#endif
           {MPV_RENDER_PARAM_SW_STRIDE, &pitch},
           {MPV_RENDER_PARAM_SW_POINTER, pixel_buffer_.get()},
           {MPV_RENDER_PARAM_INVALID, nullptr},
@@ -307,7 +312,11 @@ void VideoOutput::Resize(int64_t required_width, int64_t required_height) {
     texture->height = texture->visible_height = surface_manager_->height();
     texture->release_context = nullptr;
     texture->release_callback = [](void*) {};
+#ifdef MEDIA_KIT_WINDOWS_ARM64
+    texture->format = kFlutterDesktopPixelFormatRGBA8888;
+#else
     texture->format = kFlutterDesktopPixelFormatBGRA8888;
+#endif
     auto texture_variant =
         std::make_unique<flutter::TextureVariant>(flutter::GpuSurfaceTexture(
             kFlutterDesktopGpuSurfaceTypeDxgiSharedHandle, [&](auto, auto) {

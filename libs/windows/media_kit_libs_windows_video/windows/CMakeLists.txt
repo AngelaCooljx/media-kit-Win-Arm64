@@ -111,11 +111,11 @@ endif()
 # ------------------------------------------------------------------------------
 
 # ANGLE archive containing the pre-built shared libraries & headers.
-set(ANGLE "angle-windows-arm64.zip")
+set(ANGLE "angle-arm64-2026-05-30.zip")
 
 # Download URL & MD5 hash of the ANGLE archive.
-set(ANGLE_URL "https://github.com/jeremyfa/build-angle/releases/download/angle-c01fdb7/${ANGLE}")
-set(ANGLE_MD5 "fcd1b2cad3c3dd4cbbd1f4188e6b18de")
+set(ANGLE_URL "https://github.com/mmozeiko/build-angle/releases/download/2026-05-30/${ANGLE}")
+set(ANGLE_MD5 "782efe73281c2f1de9c5c7f35c99ecfc")
 
 # Download location of the ANGLE archive.
 set(ANGLE_ARCHIVE "${CMAKE_BINARY_DIR}/${ANGLE}")
@@ -138,8 +138,9 @@ if(NOT ANGLE_SRC_VALID)
     TARGET "${PROJECT_NAME}_ANGLE_EXTRACT"
     POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E tar xf "\"${ANGLE_ARCHIVE}\""
-    COMMAND "${CMAKE_COMMAND}" -E copy "${ANGLE_SRC}/lib/libEGL.lib" "${ANGLE_SRC}/lib/libEGL.dll.lib"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${ANGLE_SRC}/lib/libGLESv2.lib" "${ANGLE_SRC}/lib/libGLESv2.dll.lib"
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path '${ANGLE_SRC}/angle-arm64') { Copy-Item '${ANGLE_SRC}/angle-arm64/*' '${ANGLE_SRC}' -Recurse -Force }"
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path '${ANGLE_SRC}/lib/libEGL.lib') { Copy-Item '${ANGLE_SRC}/lib/libEGL.lib' '${ANGLE_SRC}/lib/libEGL.dll.lib' -Force }"
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path '${ANGLE_SRC}/lib/libGLESv2.lib') { Copy-Item '${ANGLE_SRC}/lib/libGLESv2.lib' '${ANGLE_SRC}/lib/libGLESv2.dll.lib' -Force }"
     WORKING_DIRECTORY "${ANGLE_SRC}"
   )
 endif()

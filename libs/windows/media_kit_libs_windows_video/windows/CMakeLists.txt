@@ -113,19 +113,19 @@ endif()
 # ANGLE archive containing the pre-built shared libraries & headers.
 set(ANGLE "angle-windows-arm64.zip")
 
-# Download URL of the ANGLE archive.
-set(ANGLE_URL "https://github.com/jeremyfa/build-angle/releases/latest/download/${ANGLE}")
+# Download URL & MD5 hash of the ANGLE archive.
+set(ANGLE_URL "https://github.com/jeremyfa/build-angle/releases/download/angle-c01fdb7/${ANGLE}")
+set(ANGLE_MD5 "fcd1b2cad3c3dd4cbbd1f4188e6b18de")
 
 # Download location of the ANGLE archive.
 set(ANGLE_ARCHIVE "${CMAKE_BINARY_DIR}/${ANGLE}")
 set(ANGLE_SRC "${CMAKE_BINARY_DIR}/ANGLE")
 
-# Download the archive if it doesn't exist.
-if(NOT EXISTS "${ANGLE_ARCHIVE}")
-  message(STATUS "Downloading archive from ${ANGLE_URL}...")
-  file(DOWNLOAD "${ANGLE_URL}" "${ANGLE_ARCHIVE}")
-  message(STATUS "Downloaded archive to ${ANGLE_ARCHIVE}.")
-endif()
+download_and_verify(
+  ${ANGLE_URL}
+  ${ANGLE_MD5}
+  ${ANGLE_ARCHIVE}
+)
 
 check_directory_exists_and_not_empty(${ANGLE_SRC} ANGLE_SRC_VALID)
 
@@ -194,18 +194,33 @@ else()
 endif()
 
 set(VULKAN_1_DLL "")
-# Search recursively because the ARM64 runtime zip extracts to a subdirectory
-# e.g. C:/VulkanSDK/1.4.328.1/runtime/VulkanRT-ARM64-1.4.328.1-Components/vulkan-1.dll
-file(GLOB_RECURSE VULKAN_1_DLL_CANDIDATES "C:/VulkanSDK/vulkan-1.dll")
+# Search recursively because the ARM64 runtime zip extracts to a subdirectory.
+file(GLOB_RECURSE VULKAN_1_DLL_CANDIDATES
+  LIST_DIRECTORIES false
+  "C:/VulkanSDK/*.dll"
+)
+list(FILTER VULKAN_1_DLL_CANDIDATES INCLUDE REGEX "[/\\\\]vulkan-1\\.dll$")
 
 if(VULKAN_1_DLL_CANDIDATES)
-  # Sort to get consistent results, though usually there's only one SDK version installed in CI
   list(SORT VULKAN_1_DLL_CANDIDATES)
   list(REVERSE VULKAN_1_DLL_CANDIDATES)
-  list(GET VULKAN_1_DLL_CANDIDATES 0 VULKAN_1_DLL)
+  if(CMAKE_GENERATOR_PLATFORM MATCHES "ARM64")
+    foreach(CANDIDATE IN LISTS VULKAN_1_DLL_CANDIDATES)
+      string(TOLOWER "${CANDIDATE}" CANDIDATE_LOWER)
+      if(CANDIDATE_LOWER MATCHES "arm64|aarch64")
+        set(VULKAN_1_DLL "${CANDIDATE}")
+        break()
+      endif()
+    endforeach()
+  else()
+    list(GET VULKAN_1_DLL_CANDIDATES 0 VULKAN_1_DLL)
+  endif()
+endif()
+
+if(VULKAN_1_DLL)
   message(STATUS "Found vulkan-1.dll at ${VULKAN_1_DLL}")
 else()
-  message(WARNING "vulkan-1.dll not found in C:/VulkanSDK/")
+  message(STATUS "vulkan-1.dll not found in C:/VulkanSDK/; skipping bundled Vulkan loader.")
 endif()
 
 # ------------------------------------------------------------------------------
@@ -228,7 +243,7 @@ if(NOT EXISTS "${ZLIB_SRC}")
 endif()
 
 # is_official_build=true is a GN argument. In CMake, we use CMAKE_BUILD_TYPE=Release for optimizations.
-if(NOT EXISTS "${ZLIB_BUILD}/zlib.dll" AND NOT EXISTS "${ZLIB_BUILD}/Release/zlib.dll" AND NOT EXISTS "${ZLIB_BUILD}/zlib1.dll" AND NOT EXISTS "${ZLIB_BUILD}/Release/zlib1.dll")
+if(NOT EXISTS "${ZLIB_BUILD}/zlib.dll" AND NOT EXISTS "${ZLIB_BUILD}/Release/zlib.dll" AND NOT EXISTS "${ZLIB_BUILD}/zlib1.dll" AND NOT EXISTS "${ZLIB_BUILD}/Release/zlib1.dll" AND NOT EXISTS "${ZLIB_BUILD}/z.dll" AND NOT EXISTS "${ZLIB_BUILD}/Release/z.dll")
   message(STATUS "Building zlib...")
   file(MAKE_DIRECTORY "${ZLIB_BUILD}")
   
@@ -254,7 +269,7 @@ if(NOT EXISTS "${ZLIB_BUILD}/zlib.dll" AND NOT EXISTS "${ZLIB_BUILD}/Release/zli
 endif()
 
 set(ZLIB_DLL "")
-foreach(CANDIDATE "${ZLIB_BUILD}/zlib.dll" "${ZLIB_BUILD}/Release/zlib.dll" "${ZLIB_BUILD}/zlib1.dll" "${ZLIB_BUILD}/Release/zlib1.dll")
+foreach(CANDIDATE "${ZLIB_BUILD}/zlib.dll" "${ZLIB_BUILD}/Release/zlib.dll" "${ZLIB_BUILD}/zlib1.dll" "${ZLIB_BUILD}/Release/zlib1.dll" "${ZLIB_BUILD}/z.dll" "${ZLIB_BUILD}/Release/z.dll")
   if(EXISTS "${CANDIDATE}")
     set(ZLIB_DLL "${CANDIDATE}")
     break()
@@ -262,7 +277,7 @@ foreach(CANDIDATE "${ZLIB_BUILD}/zlib.dll" "${ZLIB_BUILD}/Release/zlib.dll" "${Z
 endforeach()
 
 if(NOT ZLIB_DLL)
-    message(WARNING "zlib.dll (or zlib1.dll) not found after build in ${ZLIB_BUILD}")
+    message(WARNING "zlib.dll, zlib1.dll or z.dll not found after build in ${ZLIB_BUILD}")
 else()
     message(STATUS "Found zlib dll at ${ZLIB_DLL}")
 endif()
